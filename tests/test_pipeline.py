@@ -128,6 +128,70 @@ class TestCSVLoading:
         assert len(df) > 0, "Demo CSV is empty"
 
 
+class FakeRedshiftCursor:
+
+    def __init__(self):
+        self.description = None
+        self._rows = []
+        self.executed_query = None
+
+    def execute(self, query):
+        self.executed_query = query
+        if "information_schema.tables" in query:
+            self._rows = [("customers",), ("transactions",)]
+            self.description = [("table_name",)]
+        else:
+            self._rows = [
+                ("TXN001", "Product A", 10.00),
+                ("TXN002", "Product B", 15.00),
+            ]
+            self.description = [("transaction_id",), ("product_name",), ("unit_price",)]
+
+    def fetchall(self):
+        return self._rows
+
+    def close(self):
+        pass
+
+
+class FakeRedshiftConnection:
+
+    def __init__(self):
+        self._cursor = FakeRedshiftCursor()
+
+    def cursor(self):
+        return self._cursor
+
+    def close(self):
+        pass
+
+
+class TestRedshiftConnector:
+
+    @pytest.fixture
+    def fake_connection(self, monkeypatch):
+        from src.connectors import redshift
+        conn = FakeRedshiftConnection()
+        monkeypatch.setattr(redshift.psycopg2, "connect", lambda **kwargs: conn)
+        return conn
+
+    def test_list_tables(self, fake_connection):
+        from src.connectors.redshift import list_tables
+        tables = list_tables("host", 5439, "dev", "awsuser", "password")
+        assert tables == ["customers", "transactions"]
+
+    def test_fetch_table(self, fake_connection):
+        from src.connectors.redshift import fetch_table
+        df = fetch_table("host", 5439, "dev", "awsuser", "password", "transactions")
+        assert len(df) == 2
+        assert list(df.columns) == ["transaction_id", "product_name", "unit_price"]
+
+    def test_fetch_table_applies_limit(self, fake_connection):
+        from src.connectors.redshift import fetch_table
+        fetch_table("host", 5439, "dev", "awsuser", "password", "transactions", limit=500)
+        assert "LIMIT 500" in fake_connection.cursor().executed_query
+
+
 class TestPDFExists:
 
     def test_demo_pdf_exists(self):

@@ -630,7 +630,7 @@ elif mode == "🔌 Database Connectors":
 
     db_type = st.selectbox(
         "Database",
-        ["Azure Databricks", "Snowflake", "PostgreSQL", "MySQL", "BigQuery"],
+        ["Azure Databricks", "Snowflake", "PostgreSQL", "MySQL", "BigQuery", "Amazon Redshift"],
         label_visibility="collapsed"
     )
 
@@ -749,6 +749,30 @@ elif mode == "🔌 Database Connectors":
                     credentials_json = json.load(credentials_file)
                     with st.spinner("Connecting to BigQuery..."):
                         df = fetch_table(project_id, credentials_json, dataset, table)
+                    st.success(f"Connected — {len(df)} rows fetched")
+                    st.dataframe(df, use_container_width=True, height=240)
+                except Exception as e:
+                    st.error(f"Connection failed: {e}")
+            else:
+                st.warning("Please fill all fields")
+
+    elif db_type == "Amazon Redshift":
+        col1, col2 = st.columns(2)
+        with col1:
+            host = st.text_input("Host", placeholder="my-cluster.xxxxx.eu-west-1.redshift.amazonaws.com")
+            database = st.text_input("Database", placeholder="dev")
+            table = st.text_input("Table", placeholder="my_table")
+        with col2:
+            port = st.text_input("Port", value="5439")
+            user = st.text_input("Username", placeholder="awsuser")
+            password = st.text_input("Password", type="password")
+
+        if st.button("🔌 Connect & Fetch Table"):
+            if host and database and user and password and table:
+                try:
+                    from src.connectors.redshift import fetch_table
+                    with st.spinner("Connecting to Redshift..."):
+                        df = fetch_table(host, int(port), database, user, password, table)
                     st.success(f"Connected — {len(df)} rows fetched")
                     st.dataframe(df, use_container_width=True, height=240)
                 except Exception as e:
