@@ -2,6 +2,8 @@ import os
 import json
 from anthropic import Anthropic
 from dotenv import load_dotenv
+from pydantic import BaseModel, Field
+from typing import List
 
 load_dotenv()
 
@@ -22,19 +24,15 @@ JSON format:
     "parsing_notes": ["note1", "note2"]
 }"""
 
-class PDFParserResult:
-    def __init__(self, **kwargs):
-        self.document_type = kwargs.get("document_type", "unknown")
-        self.language = kwargs.get("language", "English")
-        self.total_sections = kwargs.get("total_sections", 0)
-        self.has_tables = kwargs.get("has_tables", False)
-        self.has_numbers = kwargs.get("has_numbers", False)
-        self.key_topics = kwargs.get("key_topics", [])
-        self.document_quality = kwargs.get("document_quality", "unknown")
-        self.parsing_notes = kwargs.get("parsing_notes", [])
-
-    def model_dump(self):
-        return self.__dict__
+class PDFParserResult(BaseModel):
+    document_type: str = "unknown"
+    language: str = "English"
+    total_sections: int = 0
+    has_tables: bool = False
+    has_numbers: bool = False
+    key_topics: List[str] = Field(default_factory=list)
+    document_quality: str = "unknown"
+    parsing_notes: List[str] = Field(default_factory=list)
 
 def run(text_preview: str, total_pages: int) -> PDFParserResult:
     print("[PDF Parser Agent] Starting...")
@@ -60,7 +58,4 @@ def run(text_preview: str, total_pages: int) -> PDFParserResult:
         return result
     except Exception as e:
         print(f"[PDF Parser Agent] Error: {e}")
-        return PDFParserResult(
-            document_type="unknown",
-            parsing_notes=["Could not parse response"]
-        )
+        return PDFParserResult(parsing_notes=["Could not parse response"])

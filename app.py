@@ -630,7 +630,7 @@ elif mode == "🔌 Database Connectors":
 
     db_type = st.selectbox(
         "Database",
-        ["Azure Databricks", "Snowflake", "PostgreSQL", "MySQL", "BigQuery"],
+        ["Azure Databricks", "Snowflake", "PostgreSQL", "MySQL", "BigQuery", "MongoDB", "Microsoft Fabric", "Amazon Redshift", "DuckDB", "Elasticsearch"],
         label_visibility="collapsed"
     )
 
@@ -732,6 +732,121 @@ elif mode == "🔌 Database Connectors":
                     st.error(f"Connection failed: {e}")
             else:
                 st.warning("Please fill all fields")
+
+    elif db_type == "MongoDB":
+        col1, col2 = st.columns(2)
+        with col1:
+            uri = st.text_input("Connection URI", placeholder="mongodb://localhost:27017")
+            collection = st.text_input("Collection", placeholder="my_collection")
+        with col2:
+            database = st.text_input("Database", placeholder="my_database")
+            limit = st.number_input("Row limit", min_value=1, max_value=100000, value=1000)
+
+        if st.button("🔌 Connect & Fetch Collection"):
+            if uri and database and collection:
+                try:
+                    from src.connectors.mongodb import fetch_collection
+                    with st.spinner("Connecting to MongoDB..."):
+                        df = fetch_collection(uri, database, collection, int(limit))
+                    st.success(f"Connected — {len(df)} documents fetched from {database}.{collection}")
+                    st.dataframe(df, use_container_width=True, height=240)
+                except Exception as e:
+                    st.error(f"Connection failed: {e}")
+            else:
+                st.warning("Please fill all fields")
+
+    elif db_type == "Microsoft Fabric":
+        col1, col2 = st.columns(2)
+        with col1:
+            server = st.text_input("Server", placeholder="xyz.datawarehouse.fabric.microsoft.com")
+            database = st.text_input("Database", placeholder="my_warehouse")
+            table = st.text_input("Table", placeholder="my_table")
+        with col2:
+            user = st.text_input("Username", placeholder="user@org.com")
+            password = st.text_input("Password", type="password")
+
+        if st.button("🔌 Connect & Fetch Table"):
+            if server and database and user and password and table:
+                try:
+                    from src.connectors.fabric import fetch_table
+                    with st.spinner("Connecting to Microsoft Fabric..."):
+                        df = fetch_table(server, database, user, password, table)
+                    st.success(f"Connected — {len(df)} rows fetched from {table}")
+                    st.dataframe(df, use_container_width=True, height=240)
+                except Exception as e:
+                    st.error(f"Connection failed: {e}")
+            else:
+                st.warning("Please fill all fields")
+
+    elif db_type == "Amazon Redshift":
+        col1, col2 = st.columns(2)
+        with col1:
+            host = st.text_input("Host", placeholder="cluster.abc123.eu-west-1.redshift.amazonaws.com")
+            database = st.text_input("Database", placeholder="dev")
+            table = st.text_input("Table", placeholder="my_table")
+        with col2:
+            port = st.text_input("Port", value="5439")
+            user = st.text_input("Username", placeholder="awsuser")
+            password = st.text_input("Password", type="password")
+
+        if st.button("🔌 Connect & Fetch Table"):
+            if host and database and user and password and table:
+                try:
+                    from src.connectors.redshift import fetch_table
+                    with st.spinner("Connecting to Redshift..."):
+                        df = fetch_table(host, int(port), database, user, password, table)
+                    st.success(f"Connected — {len(df)} rows fetched from {table}")
+                    st.dataframe(df, use_container_width=True, height=240)
+                except Exception as e:
+                    st.error(f"Connection failed: {e}")
+            else:
+                st.warning("Please fill all fields")
+
+    elif db_type == "DuckDB":
+        col1, col2 = st.columns(2)
+        with col1:
+            filepath = st.text_input("Database file path", placeholder="/path/to/my.duckdb")
+            table = st.text_input("Table", placeholder="my_table")
+        with col2:
+            limit = st.number_input("Row limit", min_value=1, max_value=100000, value=1000)
+
+        if st.button("🔌 Connect & Fetch Table"):
+            if filepath and table:
+                try:
+                    from src.connectors.duckdb_conn import fetch_table
+                    with st.spinner("Connecting to DuckDB..."):
+                        df = fetch_table(filepath, table, int(limit))
+                    st.success(f"Connected — {len(df)} rows fetched from {table}")
+                    st.dataframe(df, use_container_width=True, height=240)
+                except Exception as e:
+                    st.error(f"Connection failed: {e}")
+            else:
+                st.warning("Please fill all fields")
+
+    elif db_type == "Elasticsearch":
+        col1, col2 = st.columns(2)
+        with col1:
+            es_host = st.text_input("Host", placeholder="localhost")
+            es_index = st.text_input("Index", placeholder="my_index")
+            es_limit = st.number_input("Row limit", min_value=1, max_value=10000, value=1000)
+        with col2:
+            es_port = st.text_input("Port", value="9200")
+            es_user = st.text_input("Username (optional)", placeholder="elastic")
+            es_password = st.text_input("Password (optional)", type="password")
+            es_ssl = st.checkbox("Use SSL (HTTPS)")
+
+        if st.button("🔌 Connect & Fetch Index"):
+            if es_host and es_index:
+                try:
+                    from src.connectors.elasticsearch_conn import fetch_index
+                    with st.spinner("Connecting to Elasticsearch..."):
+                        df = fetch_index(es_host, int(es_port), es_index, es_user, es_password, es_ssl, int(es_limit))
+                    st.success(f"Connected — {len(df)} documents fetched from {es_index}")
+                    st.dataframe(df, use_container_width=True, height=240)
+                except Exception as e:
+                    st.error(f"Connection failed: {e}")
+            else:
+                st.warning("Please fill Host and Index")
 
     elif db_type == "BigQuery":
         col1, col2 = st.columns(2)

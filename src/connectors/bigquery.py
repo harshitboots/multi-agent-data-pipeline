@@ -1,7 +1,13 @@
+import re
 import pandas as pd
 from google.cloud import bigquery
 from google.oauth2 import service_account
 import json
+
+def _validate_identifier(name: str) -> str:
+    if not re.match(r'^[A-Za-z0-9_\-\.]+$', name):
+        raise ValueError(f"Invalid identifier: {name!r}")
+    return name
 
 def connect(project_id: str, credentials_json: dict):
     credentials = service_account.Credentials.from_service_account_info(
@@ -26,6 +32,6 @@ def list_datasets(project_id: str, credentials_json: dict) -> list:
 
 def fetch_table(project_id: str, credentials_json: dict, dataset: str, table: str, limit: int = 1000) -> pd.DataFrame:
     client = connect(project_id, credentials_json)
-    query = f"SELECT * FROM `{project_id}.{dataset}.{table}` LIMIT {limit}"
+    query = f"SELECT * FROM `{_validate_identifier(project_id)}.{_validate_identifier(dataset)}.{_validate_identifier(table)}` LIMIT {limit}"
     df = client.query(query).to_dataframe()
     return df

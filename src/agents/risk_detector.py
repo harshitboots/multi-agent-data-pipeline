@@ -2,6 +2,8 @@ import os
 import json
 from anthropic import Anthropic
 from dotenv import load_dotenv
+from pydantic import BaseModel, Field
+from typing import List
 
 load_dotenv()
 
@@ -22,19 +24,15 @@ JSON format:
     "recommendations": ["recommendation1", "recommendation2"]
 }"""
 
-class RiskDetectorResult:
-    def __init__(self, **kwargs):
-        self.pii_detected = kwargs.get("pii_detected", False)
-        self.pii_types = kwargs.get("pii_types", [])
-        self.compliance_risks = kwargs.get("compliance_risks", [])
-        self.legal_risks = kwargs.get("legal_risks", [])
-        self.financial_risks = kwargs.get("financial_risks", [])
-        self.overall_risk_score = kwargs.get("overall_risk_score", 0.0)
-        self.risk_level = kwargs.get("risk_level", "low")
-        self.recommendations = kwargs.get("recommendations", [])
-
-    def model_dump(self):
-        return self.__dict__
+class RiskDetectorResult(BaseModel):
+    pii_detected: bool = False
+    pii_types: List[str] = Field(default_factory=list)
+    compliance_risks: List[str] = Field(default_factory=list)
+    legal_risks: List[str] = Field(default_factory=list)
+    financial_risks: List[str] = Field(default_factory=list)
+    overall_risk_score: float = 0.0
+    risk_level: str = "low"
+    recommendations: List[str] = Field(default_factory=list)
 
 def run(text_preview: str, total_pages: int) -> RiskDetectorResult:
     print("[Risk Detector Agent] Starting...")
@@ -60,9 +58,4 @@ def run(text_preview: str, total_pages: int) -> RiskDetectorResult:
         return result
     except Exception as e:
         print(f"[Risk Detector Agent] Error: {e}")
-        return RiskDetectorResult(
-            pii_detected=False,
-            overall_risk_score=0.0,
-            risk_level="unknown",
-            recommendations=["Could not parse response"]
-        )
+        return RiskDetectorResult(recommendations=["Could not parse response"])

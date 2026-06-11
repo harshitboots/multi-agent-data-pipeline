@@ -217,7 +217,7 @@ Connect directly to your database — agents fetch a table and run the full pipe
 <br/>
 <img src="docs/images/connectors1.png" alt="Database Connectors Detail" width="900"/>
 <br/>
-<em>5 database connectors — Azure Databricks, Snowflake, PostgreSQL, MySQL, BigQuery</em>
+<em>10 database connectors — Azure Databricks, Snowflake, PostgreSQL, MySQL, BigQuery, MongoDB, Redshift, DuckDB, Microsoft Fabric, Elasticsearch</em>
 </div>
 
 ---
@@ -352,7 +352,12 @@ multi-agent-data-pipeline/
 │   │   ├── snowflake_conn.py    # Snowflake
 │   │   ├── postgres.py          # PostgreSQL
 │   │   ├── mysql.py             # MySQL
-│   │   └── bigquery.py          # BigQuery
+│   │   ├── bigquery.py          # BigQuery
+│   │   ├── mongodb.py           # MongoDB
+│   │   ├── redshift.py          # Amazon Redshift
+│   │   ├── duckdb_conn.py       # DuckDB
+│   │   ├── fabric.py            # Microsoft Fabric
+│   │   └── elasticsearch_conn.py # Elasticsearch
 │   ├── models.py                # Pydantic schemas
 │   └── pipeline.py              # Orchestrator
 ├── demo/
@@ -517,6 +522,78 @@ df = fetch_table(
 )
 ```
 
+#### MongoDB
+
+```python
+from src.connectors.mongodb import fetch_collection
+
+df = fetch_collection(
+    uri="mongodb://localhost:27017",
+    database="my_database",
+    collection="my_collection",
+    limit=1000
+)
+```
+
+#### Amazon Redshift
+
+```python
+from src.connectors.redshift import fetch_table
+
+df = fetch_table(
+    host="cluster.abc123.eu-west-1.redshift.amazonaws.com",
+    port=5439,
+    database="dev",
+    user="awsuser",
+    password="my_password",
+    table="my_table"
+)
+```
+
+#### DuckDB
+
+```python
+from src.connectors.duckdb_conn import fetch_table
+
+df = fetch_table(
+    filepath="/path/to/my.duckdb",
+    table="my_table",
+    limit=1000
+)
+```
+
+#### Microsoft Fabric
+
+> Requires [ODBC Driver 18 for SQL Server](https://learn.microsoft.com/en-us/sql/connect/odbc/download-odbc-driver-for-sql-server) installed at the OS level.
+
+```python
+from src.connectors.fabric import fetch_table
+
+df = fetch_table(
+    server="xyz.datawarehouse.fabric.microsoft.com",
+    database="my_warehouse",
+    user="user@org.com",
+    password="my_password",
+    table="my_table"
+)
+```
+
+#### Elasticsearch
+
+```python
+from src.connectors.elasticsearch_conn import fetch_index
+
+df = fetch_index(
+    host="localhost",
+    port=9200,
+    index="my_index",
+    username="elastic",   # optional
+    password="my_password",  # optional
+    use_ssl=False,
+    limit=1000
+)
+```
+
 ---
 
 ### Connector Status
@@ -528,10 +605,11 @@ df = fetch_table(
 | PostgreSQL | User/Pass | ✅ | ✅ | Stable |
 | MySQL | User/Pass | ✅ | ✅ | Stable |
 | BigQuery | Service Account JSON | ✅ | ✅ | Stable |
-| MongoDB | — | 🔜 | 🔜 | Planned |
-| Redshift | — | 🔜 | 🔜 | Planned |
-| DuckDB | — | 🔜 | 🔜 | Planned |
-| Microsoft Fabric | — | 🔜 | 🔜 | Planned |
+| MongoDB | URI | ✅ | ✅ | Stable |
+| Amazon Redshift | User/Pass | ✅ | ✅ | Stable |
+| DuckDB | File path | ✅ | ✅ | Stable |
+| Microsoft Fabric | User/Pass | ✅ | ✅ | Requires ODBC Driver 18 |
+| Elasticsearch | Optional User/Pass | ✅ | ✅ | Stable |
 
 > Want to add a connector? See [Contributing](#contributing)
 
@@ -693,11 +771,14 @@ We want to support every major database. Next targets:
 
 | Database | Difficulty | Issue |
 |----------|-----------|-------|
-| MongoDB | Medium | #1 |
-| Redshift | Easy | #2 |
-| DuckDB | Easy | #3 |
-| Microsoft Fabric | Medium | #4 |
-| Elasticsearch | Hard | #5 |
+| MongoDB | Medium | #1 ✅ |
+| Redshift | Easy | #2 ✅ |
+| DuckDB | Easy | #3 ✅ |
+| Microsoft Fabric | Medium | #4 ✅ |
+| Elasticsearch | Hard | #5 ✅ |
+| Oracle DB | Medium | #6 |
+| CockroachDB | Easy | #7 |
+| ClickHouse | Medium | #8 |
 
 #### ☁️ Cloud Implementations
 Deploy this on your cloud and contribute the implementation:
@@ -802,13 +883,17 @@ Follow this pattern — every agent has the same structure:
 ```python
 # src/agents/your_agent.py
 
+from pydantic import BaseModel, Field
+from typing import List
+
 SYSTEM_PROMPT = """You are a [role] agent.
 Respond ONLY with valid JSON. No markdown. No explanation.
 JSON format: { ... }"""
 
-class YourAgentResult:
-    def __init__(self, **kwargs): ...
-    def model_dump(self): return self.__dict__
+class YourAgentResult(BaseModel):
+    some_field: str = "default"
+    some_list: List[str] = Field(default_factory=list)
+    some_count: int = 0
 
 def run(data: str, context: int) -> YourAgentResult:
     response = client.messages.create(...)
@@ -867,7 +952,7 @@ tests/test_pipeline.py::TestCSVLoading::test_demo_csv_has_rows PASSED
 | Validation | Pydantic v2 |
 | CLI | Typer + Rich |
 | UI | Streamlit |
-| Connectors | Databricks SDK, Snowflake, psycopg2, mysql-connector, BigQuery |
+| Connectors | Databricks SDK, Snowflake, psycopg2, mysql-connector, BigQuery, pymongo, redshift-connector, duckdb, elasticsearch, pyodbc |
 | Testing | pytest |
 | Packaging | pyproject.toml |
 
@@ -877,15 +962,16 @@ tests/test_pipeline.py::TestCSVLoading::test_demo_csv_has_rows PASSED
 
 - [x] CSV pipeline — 5 agents
 - [x] PDF intelligence — 5 agents
-- [x] Database connectors — 5 databases
+- [x] Database connectors — 10 databases
 - [x] Streamlit UI — dark theme
 - [x] CLI entrypoint
 - [x] JSON export
+- [x] MongoDB connector
+- [x] Redshift connector
+- [x] DuckDB connector
+- [x] Microsoft Fabric connector
+- [x] Elasticsearch connector
 - [ ] pip package — `pip install multi-agent-data-pipeline`
-- [ ] MongoDB connector
-- [ ] Redshift connector
-- [ ] DuckDB connector
-- [ ] Microsoft Fabric connector
 - [ ] Async parallel agent execution
 - [ ] Agent memory — learn from past runs
 - [ ] Webhook support — trigger via HTTP

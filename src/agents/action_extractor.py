@@ -2,6 +2,8 @@ import os
 import json
 from anthropic import Anthropic
 from dotenv import load_dotenv
+from pydantic import BaseModel, Field
+from typing import List
 
 load_dotenv()
 
@@ -21,18 +23,14 @@ JSON format:
     "total_actions": 8
 }"""
 
-class ActionExtractorResult:
-    def __init__(self, **kwargs):
-        self.action_items = kwargs.get("action_items", [])
-        self.decisions_made = kwargs.get("decisions_made", [])
-        self.deadlines = kwargs.get("deadlines", [])
-        self.follow_ups = kwargs.get("follow_ups", [])
-        self.owners = kwargs.get("owners", [])
-        self.priority_actions = kwargs.get("priority_actions", [])
-        self.total_actions = kwargs.get("total_actions", 0)
-
-    def model_dump(self):
-        return self.__dict__
+class ActionExtractorResult(BaseModel):
+    action_items: List[str] = Field(default_factory=list)
+    decisions_made: List[str] = Field(default_factory=list)
+    deadlines: List[str] = Field(default_factory=list)
+    follow_ups: List[str] = Field(default_factory=list)
+    owners: List[str] = Field(default_factory=list)
+    priority_actions: List[str] = Field(default_factory=list)
+    total_actions: int = 0
 
 def run(text_preview: str, total_pages: int) -> ActionExtractorResult:
     print("[Action Extractor Agent] Starting...")
@@ -58,7 +56,4 @@ def run(text_preview: str, total_pages: int) -> ActionExtractorResult:
         return result
     except Exception as e:
         print(f"[Action Extractor Agent] Error: {e}")
-        return ActionExtractorResult(
-            action_items=["Could not parse response"],
-            total_actions=0
-        )
+        return ActionExtractorResult(action_items=["Could not parse response"])

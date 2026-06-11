@@ -2,6 +2,8 @@ import os
 import json
 from anthropic import Anthropic
 from dotenv import load_dotenv
+from pydantic import BaseModel, Field
+from typing import List
 
 load_dotenv()
 
@@ -21,18 +23,14 @@ JSON format:
     "total_entities": 15
 }"""
 
-class EntityExtractorResult:
-    def __init__(self, **kwargs):
-        self.people = kwargs.get("people", [])
-        self.organisations = kwargs.get("organisations", [])
-        self.locations = kwargs.get("locations", [])
-        self.dates = kwargs.get("dates", [])
-        self.amounts = kwargs.get("amounts", [])
-        self.emails = kwargs.get("emails", [])
-        self.total_entities = kwargs.get("total_entities", 0)
-
-    def model_dump(self):
-        return self.__dict__
+class EntityExtractorResult(BaseModel):
+    people: List[str] = Field(default_factory=list)
+    organisations: List[str] = Field(default_factory=list)
+    locations: List[str] = Field(default_factory=list)
+    dates: List[str] = Field(default_factory=list)
+    amounts: List[str] = Field(default_factory=list)
+    emails: List[str] = Field(default_factory=list)
+    total_entities: int = 0
 
 def run(text_preview: str, total_pages: int) -> EntityExtractorResult:
     print("[Entity Extractor Agent] Starting...")
@@ -58,12 +56,4 @@ def run(text_preview: str, total_pages: int) -> EntityExtractorResult:
         return result
     except Exception as e:
         print(f"[Entity Extractor Agent] Error: {e}")
-        return EntityExtractorResult(
-            people=[],
-            organisations=[],
-            locations=[],
-            dates=[],
-            amounts=[],
-            emails=[],
-            total_entities=0
-        )
+        return EntityExtractorResult()
