@@ -1,7 +1,7 @@
 import psycopg2
 import pandas as pd
 from typing import List
-
+from psycopg2 import sql
 def connect(host: str, port: int, database: str, user: str, password: str):
     """Establish a connection to Amazon Redshift.
     
@@ -73,11 +73,16 @@ def fetch_table(host: str, port: int, database: str, user: str, password: str, t
         
     Raises:
         psycopg2.Error: If connection or query fails
+        ValueError: If table name is invalid
     """
+    if not table.replace('_', '').isalnum():
+        raise ValueError(f"Invalid table name: {table}")
+
     conn = connect(host, port, database, user, password)
     cursor = conn.cursor()
     try:
-        cursor.execute(f"SELECT * FROM {table} LIMIT {limit}")
+        query = sql.SQL("SELECT * FROM {} LIMIT %s").format(sql.Identifier(table))
+        cursor.execute(query, (limit,))
         columns = [desc[0] for desc in cursor.description]
         rows = cursor.fetchall()
         return pd.DataFrame(rows, columns=columns)
