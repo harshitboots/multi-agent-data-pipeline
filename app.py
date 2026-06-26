@@ -15,6 +15,7 @@ from src.pipeline import run_pipeline
 from src.auth.credits import get_or_create_user, get_credits, record_run, refresh_github_status, can_run
 from src.auth.github_api import get_repo_stats, validate_username
 from src.observability.store import init_db
+from src.observability.guardrails import GuardrailEngine
 
 st.set_page_config(
     page_title="Multi-Agent Pipeline · Britcore.AI",
@@ -514,10 +515,14 @@ if mode == "📄 CSV Pipeline":
                     df.to_csv(tmp.name, index=False)
                     tmp_path = tmp.name
 
+                guardrail_cfg = st.session_state.get("guardrail_config", {})
+                guardrails = GuardrailEngine(**guardrail_cfg) if guardrail_cfg else GuardrailEngine()
+
                 with st.spinner(f"Running pipeline ({mode_label})..."):
                     result = run_pipeline(
                         tmp_path,
                         routing_enabled=routing_on,
+                        guardrails=guardrails,
                         api_key=api_key_to_use,
                     )
                 os.unlink(tmp_path)
@@ -916,8 +921,18 @@ elif mode == "🔌 Database Connectors":
 
     if df is not None and not df.empty:
         st.markdown('<div style="margin-top:8px;"></div>', unsafe_allow_html=True)
+        db_routing_on = st.toggle("Enable Router for DB data", value=False, key="db_router_toggle")
         if st.button("⚡ RUN PIPELINE ON THIS DATA — ALL 6 AGENTS →"):
-            run_pipeline_ui(df)
+            with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as tmp:
+                df.to_csv(tmp.name, index=False)
+                tmp_path = tmp.name
+            guardrail_cfg = st.session_state.get("guardrail_config", {})
+            guardrails = GuardrailEngine(**guardrail_cfg) if guardrail_cfg else GuardrailEngine()
+            with st.spinner("Running pipeline..."):
+                result = run_pipeline(tmp_path, routing_enabled=db_routing_on, guardrails=guardrails)
+            os.unlink(tmp_path)
+            st.success(f"Done — GBP {result.total_cost_gbp:.5f} · {result.total_latency_ms}ms")
+            _display_result_tabs(result)
 
     st.markdown('</div>', unsafe_allow_html=True)
 
