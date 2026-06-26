@@ -43,6 +43,14 @@ def has_forked(username: str) -> bool:
         return False
 
 
+def has_followed(username: str, target: str = "harshitboots") -> bool:
+    try:
+        r = _get(f"{_BASE}/users/{username}/following/{target}")
+        return r.status_code == 204
+    except Exception:
+        return False
+
+
 def validate_username(username: str) -> bool:
     try:
         r = _get(f"{_BASE}/users/{username}")

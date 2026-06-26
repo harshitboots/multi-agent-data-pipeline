@@ -23,10 +23,10 @@ JSON format:
 
 
 def run(csv_preview: str, total_rows: int, context: str = "",
-        model: str = None, span=None) -> SummariserResult:
+        model: str = None, span=None, api_key: str = None) -> SummariserResult:
     if model is None:
         model = MODELS["quality"]
-    client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+    client = Anthropic(api_key=api_key or os.getenv("ANTHROPIC_API_KEY"))
     user_msg = f"Summarise this dataset ({total_rows} total rows).\n\nAgent findings:\n{context}"
 
     try:
