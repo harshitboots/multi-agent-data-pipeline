@@ -4,12 +4,17 @@ import json
 import os
 import sys
 import base64
+import tempfile
 from dotenv import load_dotenv
 
 load_dotenv()
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from src.agents import cleaner, validator, transformer, anomaly, summariser,  pii_anonymiser
+from src.agents import cleaner, validator, transformer, anomaly, summariser, pii_anonymiser
+from src.pipeline import run_pipeline
+from src.auth.credits import get_or_create_user, get_credits, record_run, refresh_github_status, can_run
+from src.auth.github_api import get_repo_stats, validate_username
+from src.observability.store import init_db
 
 st.set_page_config(
     page_title="Multi-Agent Pipeline · Britcore.AI",
@@ -319,144 +324,242 @@ mode = st.radio(
 
 st.markdown('<div style="height:1px;background:#0f1f35;margin:0 48px;"></div>', unsafe_allow_html=True)
 
-def run_pipeline_ui(df):
-    total_rows = len(df)
-    preview = df.head(20).to_csv(index=False)
-    progress = st.progress(0)
-
-    with st.status("Agent 1 / 6 — Cleaner", expanded=False) as s:
-        cleaner_result = cleaner.run(preview, total_rows)
-        s.update(label="✅ Agent 1 / 6 — Cleaner complete", state="complete")
-    progress.progress(17)
-
-    with st.status("Agent 2 / 6 — PII Anonymiser", expanded=False) as s:
-        pii_result = pii_anonymiser.run(preview, total_rows)
-        s.update(label="✅ Agent 2 / 6 — PII Anonymiser complete", state="complete")
-    progress.progress(33)
-
-    with st.status("Agent 3 / 6 — Validator", expanded=False) as s:
-        validator_result = validator.run(preview, total_rows)
-        s.update(label="✅ Agent 3 / 6 — Validator complete", state="complete")
-    progress.progress(50)
-    
-    with st.status("Agent 4 / 6 — Transformer", expanded=False) as s:
-        transformer_result = transformer.run(preview, total_rows)
-        s.update(label="✅ Agent 4 / 6 — Transformer complete", state="complete")
-    progress.progress(67)
-
-    with st.status("Agent 5 / 6 — Anomaly Detector", expanded=False) as s:
-        anomaly_result = anomaly.run(preview, total_rows)
-        s.update(label="✅ Agent 5 / 6 — Anomaly Detector complete", state="complete")
-    progress.progress(83)
-
-    context = (
-        f"Cleaner: {len(cleaner_result.issues_fixed)} issues. "
-        f"PII Anonymiser: {pii_result.rows_affected} rows contained PII "
-        f"({', '.join(pii_result.pii_types_detected) or 'none detected'}). "
-        f"Validator: {validator_result.completeness_score}%. "
-        f"Transformer: {len(transformer_result.transformations_applied)} transforms. "
-        f"Anomaly: {anomaly_result.anomaly_count} found."
-    )
-
-    with st.status("Agent 6 / 6 — Summariser", expanded=False) as s:
-        summariser_result = summariser.run(preview, total_rows, context)
-        s.update(label="✅ Agent 6 / 6 — Summariser complete", state="complete")
-    progress.progress(100)
-
+def _display_result_tabs(result):
+    if not result:
+        return
     c1, c2, c3, c4, c5, c6 = st.columns(6)
-    c1.metric("Rows Fixed", cleaner_result.rows_affected)
-    c2.metric("PII Rows Masked", pii_result.rows_affected)
-    c3.metric("Completeness", f"{validator_result.completeness_score}%")
-    c4.metric("Transformed", transformer_result.rows_transformed)
-    c5.metric("Anomalies", anomaly_result.anomaly_count)
-    c6.metric("Recommendations", len(summariser_result.recommendations))
+    c1.metric("Rows Fixed", result.cleaner.rows_affected if result.cleaner else 0)
+    c2.metric("PII Rows", result.pii.rows_affected if result.pii else 0)
+    c3.metric("Completeness", f"{result.validator.completeness_score if result.validator else 0}%")
+    c4.metric("Transformed", result.transformer.rows_transformed if result.transformer else 0)
+    c5.metric("Anomalies", result.anomaly.anomaly_count if result.anomaly else 0)
+    c6.metric("Quality", f"{result.quality_score}%")
 
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["🧹 Cleaner", "🔒 PII Anonymiser", "🛡 Validator", "⚡ Transformer", "📡 Anomaly", "📊 Summariser"])
-
-    with tab1:
-        for issue in cleaner_result.issues_fixed:
-            st.markdown(f"- {issue}")
-        if cleaner_result.cleaned_columns:
-            st.info(f"Cleaned columns: {', '.join(cleaner_result.cleaned_columns)}")
-
-    with tab2:
-        if pii_result.pii_types_detected:
-            st.warning(f"PII types found: {', '.join(pii_result.pii_types_detected)}")
-            st.markdown(f"**Rows containing PII:** {pii_result.rows_affected}")
-        else:
-            st.success("No PII detected in the preview rows")
-
-        if pii_result.pii_found:
-            st.markdown("**Findings:**")
-            for f in pii_result.pii_found:
-                st.markdown(f"- {f}")
-
-        with st.expander("View anonymised preview"):
-            st.code(pii_result.anonymised_preview, language="csv")
-
-    with tab3:
-        st.markdown(f"**Schema valid:** {'✅ Yes' if validator_result.schema_ok else '❌ No'}")
-        st.markdown(f"**Completeness:** {validator_result.completeness_score}%")
-        for v in validator_result.violations:
-            st.error(v)
-        for c in validator_result.passed_checks:
-            st.success(c)
-
-    with tab4:
-        for t in transformer_result.transformations_applied:
-            st.markdown(f"- {t}")
-        if transformer_result.new_columns:
-            st.info(f"New columns: {', '.join(transformer_result.new_columns)}")
-
-    with tab5:
-        st.markdown(f"**Risk score:** {anomaly_result.anomaly_score}/10")
-        for a in anomaly_result.anomalies:
-            st.warning(a)
-
-    with tab6:
-        st.info(summariser_result.summary)
-        st.json(summariser_result.key_stats)
-        for r in summariser_result.recommendations:
-            st.markdown(f"→ {r}")
-
-    full_results = {
-        "total_rows": total_rows,
-        "cleaner": cleaner_result.model_dump(),
-        "pii_anonymiser": pii_result.model_dump(),
-        "validator": validator_result.model_dump(),
-        "transformer": transformer_result.model_dump(),
-        "anomaly": anomaly_result.model_dump(),
-        "summariser": summariser_result.model_dump()
-    }
-
-    st.download_button(
-        label="⬇️ Download Results as JSON",
-        data=json.dumps(full_results, indent=2),
-        file_name="pipeline_results.json",
-        mime="application/json",
-        use_container_width=True
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
+        ["Cleaner", "PII", "Validator", "Transformer", "Anomaly", "Summariser"]
     )
+    with tab1:
+        if result.cleaner:
+            for issue in result.cleaner.issues_fixed:
+                st.markdown(f"- {issue}")
+    with tab2:
+        if result.pii:
+            if result.pii.pii_types_detected:
+                st.warning(f"PII types: {', '.join(result.pii.pii_types_detected)}")
+            for f in result.pii.pii_found:
+                st.markdown(f"- {f}")
+    with tab3:
+        if result.validator:
+            st.markdown(f"**Completeness:** {result.validator.completeness_score}%")
+            for v in result.validator.violations:
+                st.error(v)
+    with tab4:
+        if result.transformer:
+            for t in result.transformer.transformations_applied:
+                st.markdown(f"- {t}")
+    with tab5:
+        if result.anomaly:
+            st.markdown(f"**Risk score:** {result.anomaly.anomaly_score}/10")
+            for a in result.anomaly.anomalies:
+                st.warning(a)
+    with tab6:
+        if result.summariser:
+            st.info(result.summariser.summary)
+            st.json(result.summariser.key_stats)
+            for r in result.summariser.recommendations:
+                st.markdown(f"- {r}")
+
+
+def _display_cost_card(result, label: str):
+    if not result:
+        return
+    st.markdown(f"**{label}**")
+    st.metric("Total Cost", f"GBP {result.total_cost_gbp:.5f}")
+    st.metric("Latency", f"{result.total_latency_ms}ms")
+    st.metric("Mode", result.mode)
+    if result.telemetry:
+        rows = [{"Agent": t.agent_name, "Model": t.model_label,
+                 "Cost GBP": f"{t.cost_gbp:.5f}", "Latency ms": t.latency_ms,
+                 "Status": "ok" if t.parse_ok else "FAIL"}
+                for t in result.telemetry]
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+
+def _comparison_table(baseline, routed):
+    if not baseline or not routed:
+        return
+    st.markdown("### Cost Comparison")
+    rows = []
+    for bt in baseline.telemetry:
+        rt_match = next((r for r in routed.telemetry if r.agent_name == bt.agent_name), None)
+        saving = ((bt.cost_gbp - rt_match.cost_gbp) / bt.cost_gbp * 100) if rt_match and bt.cost_gbp > 0 else 0
+        rows.append({
+            "Agent": bt.agent_name,
+            "Without Router": f"GBP {bt.cost_gbp:.5f} ({bt.model_label})",
+            "With Router": f"GBP {rt_match.cost_gbp:.5f} ({rt_match.model_label})" if rt_match else "-",
+            "Saving": f"{saving:.0f}%" if saving else "-",
+        })
+    rows.append({
+        "Agent": "TOTAL",
+        "Without Router": f"GBP {baseline.total_cost_gbp:.5f}",
+        "With Router": f"GBP {routed.total_cost_gbp:.5f}",
+        "Saving": f"{(baseline.total_cost_gbp - routed.total_cost_gbp) / baseline.total_cost_gbp * 100:.0f}%" if baseline.total_cost_gbp > 0 else "-",
+    })
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    lat_saving = (baseline.total_latency_ms - routed.total_latency_ms) / baseline.total_latency_ms * 100 if baseline.total_latency_ms > 0 else 0
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Cost saved", f"{(baseline.total_cost_gbp - routed.total_cost_gbp):.5f} GBP")
+    c2.metric("Latency saved", f"{lat_saving:.0f}%")
+    c3.metric("Quality delta", f"{routed.quality_score - baseline.quality_score:+.1f}%")
+
+init_db()
 
 if mode == "📄 CSV Pipeline":
     st.markdown('<div class="section-pad">', unsafe_allow_html=True)
-    st.markdown('<div class="section-label">Upload your dataset</div>', unsafe_allow_html=True)
 
+    # --- Repo stats banner ---
+    try:
+        stats = get_repo_stats()
+        st.markdown(
+            f'<div style="font-family:Space Mono,monospace;font-size:11px;color:#94a3b8;'
+            f'padding:8px 0 16px;">'
+            f'GitHub: {stats["stars"]} stars &nbsp;·&nbsp; {stats["forks"]} forks</div>',
+            unsafe_allow_html=True
+        )
+    except Exception:
+        pass
+
+    # --- GitHub username + credits ---
+    st.markdown('<div class="section-label">Access</div>', unsafe_allow_html=True)
+    gh_col, byok_col = st.columns([1, 1])
+    with gh_col:
+        github_username = st.text_input(
+            "GitHub username (for credits)", placeholder="e.g. harshitboots",
+            key="gh_user"
+        )
+        if github_username and st.button("Check credits", key="check_credits"):
+            with st.spinner("Checking GitHub..."):
+                if validate_username(github_username):
+                    refresh_github_status(github_username)
+                    st.session_state["github_user"] = github_username
+                    st.success("GitHub username verified")
+                else:
+                    st.error("GitHub username not found")
+
+    active_user = st.session_state.get("github_user", github_username or "")
+    byok_key = ""
+    credits_info = None
+
+    if active_user:
+        credits_info = get_credits(active_user)
+        with gh_col:
+            st.markdown(
+                f"**Free runs:** {credits_info['remaining_free']} remaining "
+                f"({credits_info['runs_used']}/{credits_info['max_free_runs']} used)"
+            )
+            if credits_info["has_starred"]:
+                st.success("Starred — bonus run active")
+            elif not credits_info["has_starred"]:
+                st.info("Star the repo to get +1 free run")
+
+        if credits_info["needs_byok"]:
+            with byok_col:
+                st.warning("Free runs used — add your Anthropic API key to continue")
+                byok_key = st.text_input(
+                    "Anthropic API key", type="password",
+                    placeholder="sk-ant-...", key="byok_key"
+                )
+                st.caption("Your key is only used in this session. Never stored.")
+
+    st.markdown('<div style="height:16px;"></div>', unsafe_allow_html=True)
+
+    # --- Router toggle ---
+    st.markdown('<div class="section-label">Pipeline mode</div>', unsafe_allow_html=True)
+    routing_on = st.toggle(
+        "Enable Router — routes agents to Haiku (fast) or Sonnet (quality) based on task complexity",
+        value=False, key="router_toggle"
+    )
+    mode_label = "WITH ROUTER" if routing_on else "WITHOUT ROUTER (baseline — all Sonnet)"
+    st.markdown(
+        f'<div style="font-family:Space Mono,monospace;font-size:11px;color:{"#34d399" if routing_on else "#94a3b8"};'
+        f'padding:4px 0 16px;">Current mode: {mode_label}</div>',
+        unsafe_allow_html=True
+    )
+
+    # --- File upload ---
+    st.markdown('<div class="section-label">Upload your dataset</div>', unsafe_allow_html=True)
     uploaded_file = st.file_uploader("Drop CSV here", type=["csv"], label_visibility="collapsed")
     use_demo = st.checkbox("Use demo dataset — retail transactions with intentional data quality issues")
 
+    df = None
     if use_demo and os.path.exists("demo/sample_data.csv"):
         df = pd.read_csv("demo/sample_data.csv")
         st.success(f"Demo loaded — {len(df)} rows · {len(df.columns)} columns")
-        st.dataframe(df, use_container_width=True, height=240)
+        st.dataframe(df, use_container_width=True, height=200)
     elif uploaded_file:
         df = pd.read_csv(uploaded_file)
         st.success(f"Loaded — {len(df)} rows · {len(df.columns)} columns")
-        st.dataframe(df, use_container_width=True, height=240)
+        st.dataframe(df, use_container_width=True, height=200)
 
-    if use_demo or uploaded_file:
-        if st.button("⚡ RUN PIPELINE — ALL 6 AGENTS →"):
-            df = pd.read_csv("demo/sample_data.csv") if use_demo else pd.read_csv(uploaded_file)
-            run_pipeline_ui(df)
+    if df is not None:
+        run_label = f"Run Pipeline — {mode_label}"
+        if st.button(f"Run Pipeline — {mode_label}", use_container_width=True):
+            # access check
+            run_ok, run_mode = (True, "free") if not active_user else can_run(active_user, byok_key or None)
+            if not run_ok:
+                st.error("No free runs remaining. Add your Anthropic API key above to continue.")
+            else:
+                api_key_to_use = byok_key if run_mode == "byok" else None
+                with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as tmp:
+                    df.to_csv(tmp.name, index=False)
+                    tmp_path = tmp.name
+
+                with st.spinner(f"Running pipeline ({mode_label})..."):
+                    result = run_pipeline(
+                        tmp_path,
+                        routing_enabled=routing_on,
+                        api_key=api_key_to_use,
+                    )
+                os.unlink(tmp_path)
+
+                if active_user and run_mode == "free":
+                    record_run(active_user)
+
+                # store result in session state keyed by mode
+                if routing_on:
+                    st.session_state["run_routed"] = result
+                else:
+                    st.session_state["run_baseline"] = result
+
+                st.success(
+                    f"Done — GBP {result.total_cost_gbp:.5f} · "
+                    f"{result.total_latency_ms}ms · "
+                    f"Quality: {result.quality_score}%"
+                )
+                _display_result_tabs(result)
+
+    # --- Comparison panel (appears when both runs exist) ---
+    baseline_result = st.session_state.get("run_baseline")
+    routed_result = st.session_state.get("run_routed")
+
+    if baseline_result or routed_result:
+        st.markdown('<div class="section-label">Cost Dashboard</div>', unsafe_allow_html=True)
+
+        if baseline_result and routed_result:
+            _comparison_table(baseline_result, routed_result)
+            st.markdown("---")
+
+        col_b, col_r = st.columns(2)
+        with col_b:
+            if baseline_result:
+                _display_cost_card(baseline_result, "Without Router (Baseline)")
+            else:
+                st.info("Run pipeline WITHOUT router to populate this column")
+        with col_r:
+            if routed_result:
+                _display_cost_card(routed_result, "With Router")
+            else:
+                st.info("Run pipeline WITH router to populate this column")
 
     st.markdown('</div>', unsafe_allow_html=True)
 
